@@ -88,9 +88,6 @@ This is a PeerJS-based video chat application that allows users to connect and c
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## Contact
-
-For any questions or issues, please contact the repository maintainer at [your-email@example.com].
 
 ---
 
