@@ -1,11 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PeerJS Video Chat</title>
-    <!-- Font Awesome CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
@@ -56,7 +54,7 @@
             color: #ecf0f1;
             border: none;
             padding: 10px;
-            border-radius: 20%;
+            border-radius: 50%;
             cursor: pointer;
             font-size: 1.5rem;
             width: 50px;
@@ -111,7 +109,6 @@
         }
     </style>
 </head>
-
 <body>
     <h1>PEERJS Video Chat</h1>
 
@@ -212,6 +209,7 @@
                     });
 
                     call = incomingCall;
+                    showControls(); // Show controls when call is received
                 });
 
                 // Handle incoming connections
@@ -267,7 +265,11 @@
             updateStatus(`Connected to peer ID ${peerId}`);
 
             conn.on('data', (data) => {
-                displayMessage('Peer', data);
+                if (data.action) {
+                    handlePeerAction(data.action);
+                } else {
+                    displayMessage('Peer', data.message);
+                }
             });
 
             conn.on('close', () => {
@@ -281,25 +283,30 @@
             // Setup event listener for sending messages
             document.getElementById('send-button').addEventListener('click', () => {
                 const message = document.getElementById('message-input').value;
-                if (message.trim() !== '') {
-                    conn.send(message);
+                if (message.trim()) {
                     displayMessage('You', message);
+                    connection.send({ message });
                     document.getElementById('message-input').value = '';
                 }
             });
 
-            // Initiate call to the connected peer
-            if (localStream) {
-                call = peer.call(peerId, localStream);
+            // Show the controls when connected
+            showControls();
+        }
 
-                call.on('stream', (remoteStream) => {
-                    remoteVideo.srcObject = remoteStream;
-                    console.log('Received remote stream');
-                });
+        // Display controls when a connection is established
+        function showControls() {
+            startButton.style.display = 'none';
+            skipButton.style.display = 'inline-block';
+            stopButton.style.display = 'inline-block';
+        }
 
-                call.on('close', () => {
-                    handleDisconnection();
-                });
+        // Handle actions sent by the peer
+        function handlePeerAction(action) {
+            if (action === 'skip') {
+                skipConnection();
+            } else if (action === 'stop') {
+                stopConnection();
             }
         }
 
@@ -310,6 +317,18 @@
                 if (randomPeerId) {
                     connection = peer.connect(randomPeerId);
                     setupConnection(connection, randomPeerId);
+
+                    // Make the call to the random peer
+                    if (localStream) {
+                        call = peer.call(randomPeerId, localStream);
+                        call.on('stream', (remoteStream) => {
+                            remoteVideo.srcObject = remoteStream;
+                            console.log('Connected to remote stream');
+                        });
+                        call.on('close', () => {
+                            handleDisconnection();
+                        });
+                    }
                 } else {
                     updateStatus('No available peers to reconnect.');
                 }
@@ -347,9 +366,18 @@
                 if (randomPeerId) {
                     connection = peer.connect(randomPeerId);
                     setupConnection(connection, randomPeerId);
-                    startButton.style.display = 'none';
-                    skipButton.style.display = 'inline-block';
-                    stopButton.style.display = 'inline-block';
+
+                    // Make the call to the random peer
+                    if (localStream) {
+                        call = peer.call(randomPeerId, localStream);
+                        call.on('stream', (remoteStream) => {
+                            remoteVideo.srcObject = remoteStream;
+                            console.log('Connected to remote stream');
+                        });
+                        call.on('close', () => {
+                            handleDisconnection();
+                        });
+                    }
                 } else {
                     updateStatus('No available peers to connect.');
                 }
@@ -359,46 +387,182 @@
             });
         });
 
-        // Event listener for the skip button
-        skipButton.addEventListener('click', () => {
-            if (connection) {
-                connection.close();
-                connection = null;
-            }
-            if (call) {
-                call.close();
-                call = null;
-            }
+// Event listener for the skip button
+skipButton.addEventListener('click', () => {
+    skipConnection();
+});
 
-            updateStatus('Skipped to next peer.');
+// Skip the current connection
+function skipConnection() {
+    if (connection) {
+        // Notify the peer to refresh
+        connection.send({ action: 'refresh' });
+        
+        // Close the current connection
+        connection.close();
+        connection = null;
+    }
+    if (call) {
+        call.close();
+        call = null;
+    }
+
+    updateStatus('Skipping to the next peer...');
+    
+    // Attempt to connect to a new peer
+    findRandomPeer().then(randomPeerId => {
+        if (randomPeerId) {
+            connection = peer.connect(randomPeerId);
+            setupConnection(connection, randomPeerId);
+
+            // Make the call to the random peer
+            if (localStream) {
+                call = peer.call(randomPeerId, localStream);
+                call.on('stream', (remoteStream) => {
+                    remoteVideo.srcObject = remoteStream;
+                    console.log('Connected to remote stream');
+                });
+                call.on('close', () => {
+                    handleDisconnection();
+                });
+            }
+        } else {
+            updateStatus('No available peers to connect.');
+        }
+    }).catch(error => {
+        console.error('Failed to connect to a new peer:', error);
+        updateStatus('Error connecting to a new peer.');
+    });
+}
+
+// Handle incoming messages from the peer
+function handleIncomingMessage(data) {
+    if (data.action === 'refresh') {
+        location.reload(); // Refresh the page if the other peer sends a refresh command
+    } else if (data.message) {
+        displayMessage('Peer', data.message);
+    }
+}
+
+// Setup connection with the peer
+function setupConnection(conn, peerId) {
+    chatBox.style.display = 'block';
+    updateStatus(`Connected to peer ID ${peerId}`);
+
+    conn.on('data', (data) => {
+        handleIncomingMessage(data);
+    });
+
+    conn.on('close', () => {
+        updateStatus('Disconnected from peer.');
+        chatBox.style.display = 'none';
+        handleDisconnection(); // Clean up and try to reconnect
+    });
+
+    connection = conn;
+
+    // Setup event listener for sending messages
+    document.getElementById('send-button').addEventListener('click', () => {
+        const message = document.getElementById('message-input').value;
+        if (message.trim() !== '') {
+            conn.send({ message });
+            displayMessage('You', message);
+            document.getElementById('message-input').value = '';
+        }
+    });
+
+    // Initiate call to the connected peer
+    if (localStream) {
+        call = peer.call(peerId, localStream);
+
+        call.on('stream', (remoteStream) => {
+            remoteVideo.srcObject = remoteStream;
+            console.log('Received remote stream');
+        });
+
+        call.on('close', () => {
             handleDisconnection();
         });
+    } else {
+        console.error('No local stream available for calling the peer');
+    }
+}
 
-        // Event listener for the stop button
-        stopButton.addEventListener('click', () => {
-            if (connection) {
-                connection.close();
-                connection = null;
-            }
-            if (call) {
-                call.close();
-                call = null;
-            }
+// Event listener for the stop button
+stopButton.addEventListener('click', () => {
+    stopConnectionAndRefresh();
+});
 
-            updateStatus('Stopped the chat.');
-            chatBox.style.display = 'none';
-            startButton.style.display = 'inline-block';
-            skipButton.style.display = 'none';
-            stopButton.style.display = 'none';
+// Stop the current connection and refresh both peers
+function stopConnectionAndRefresh() {
+    try {
+        // Notify peer to refresh if still connected
+        if (connection && connection.open) {
+            connection.send({ action: 'refresh' });
+        }
+
+        // Refresh the local page
+        location.reload();
+    } catch (error) {
+        console.error('Error while stopping the connection:', error);
+        updateStatus('Failed to stop the chat.');
+    }
+}
+
+// Handle incoming messages from the peer
+function handleIncomingMessage(data) {
+    if (data.action === 'refresh') {
+        location.reload(); // Refresh the page if the other peer sends a refresh command
+    } else if (data.message) {
+        displayMessage('Peer', data.message);
+    }
+}
+
+// Setup connection with the peer
+function setupConnection(conn, peerId) {
+    chatBox.style.display = 'block';
+    updateStatus(`Connected to peer ID ${peerId}`);
+
+    conn.on('data', (data) => {
+        handleIncomingMessage(data);
+    });
+
+    conn.on('close', () => {
+        updateStatus('Disconnected from peer.');
+        chatBox.style.display = 'none';
+        stopConnectionAndRefresh(); // Ensure everything is cleaned up and refresh
+    });
+
+    connection = conn;
+
+    // Setup event listener for sending messages
+    document.getElementById('send-button').addEventListener('click', () => {
+        const message = document.getElementById('message-input').value;
+        if (message.trim() !== '') {
+            conn.send({ message });
+            displayMessage('You', message);
+            document.getElementById('message-input').value = '';
+        }
+    });
+
+    // Initiate call to the connected peer
+    if (localStream) {
+        call = peer.call(peerId, localStream);
+
+        call.on('stream', (remoteStream) => {
+            remoteVideo.srcObject = remoteStream;
+            console.log('Received remote stream');
         });
 
-        // Clean up on page unload
-        window.addEventListener('beforeunload', () => {
-            if (peer) {
-                peer.destroy();
-            }
+        call.on('close', () => {
+            stopConnectionAndRefresh(); // Ensure cleanup when the call ends and refresh
         });
+    } else {
+        console.error('No local stream available for calling the peer');
+    }
+}
+
+
     </script>
 </body>
-
 </html>
